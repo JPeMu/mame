@@ -1,0 +1,216 @@
+// license:BSD-3-Clause
+// copyright-holders:David Haywood, Tony Friery
+
+#ifndef MAME_MAYGAY_MAYGAYEP_H
+#define MAME_MAYGAY_MAYGAYEP_H
+
+#pragma once
+
+#include "awpvid.h"       //Fruit Machines Only
+
+#include "cpu/h8/h83002.h"
+#include "sound/ymz280b.h"
+#include "machine/timer.h"
+#include "machine/meters.h"
+#include "machine/nvram.h"
+#include "machine/roc10937.h"   // vfd
+#include "machine/steppers.h"   // stepper motor
+
+
+class maygayep_state : public driver_device {
+public:
+  maygayep_state(const machine_config &mconfig, device_type type, const char *tag) :
+      driver_device(mconfig, type, tag), 
+      m_maincpu(*this, "maincpu"),
+      m_sw1_port(*this, "SW1"),
+      m_sw2_port(*this, "SW2"),
+      m_vfd(*this, "vfd"),
+      m_reels(*this, "reel%u", 0U),
+      m_meters(*this, "meters"),
+      m_lamps(*this, "lamp%u", 0U)
+  {    
+  }
+
+  void maygayep(machine_config &config);
+
+  void init_maygayep();
+
+private:
+
+  // devices
+  required_device<cpu_device> m_maincpu;
+  required_ioport m_sw1_port;
+  required_ioport m_sw2_port;
+	optional_device<s16lf01_device> m_vfd;
+	required_device_array<stepper_device, 6> m_reels;
+	optional_device<meters_device> m_meters;
+	output_finder<512> m_lamps;
+
+  // Internal
+  uint8_t ep_int_enable;
+  uint8_t ep_int_status;
+  uint8_t ep_last_read_int_status;
+	
+  // Hardware
+  uint8_t m_Lamps[512]{};
+	int m_optic_pattern = 0;
+
+	virtual void machine_start() override;
+	virtual void machine_reset() override;
+
+  TIMER_DEVICE_CALLBACK_MEMBER( refreshtimer ); // 6.4 kHz Refresh Timer
+  TIMER_DEVICE_CALLBACK_MEMBER( synctimer );    // 100Hz Sync Timer
+  INTERRUPT_GEN_MEMBER(external_interrupt);
+
+	template <unsigned N> DECLARE_WRITE_LINE_MEMBER(reel_optic_cb) { if (state) m_optic_pattern |= (1 << N); else m_optic_pattern &= ~(1 << N); }
+
+  void raise_ext_irq5(void);
+  void maygayep_map(address_map &map);
+  uint8_t lamps_read(offs_t addr);
+  void lamps_write(offs_t addr, uint8_t value);
+  uint8_t leds_read(offs_t addr);
+  void leds_write(offs_t addr, uint8_t value);
+  uint8_t epsysstt_r(offs_t addr);
+  void epsysstt_w(offs_t addr, uint8_t value);
+  uint8_t epsysctl_r(offs_t addr);
+  void epsysctl_w(offs_t addr, uint8_t value);
+  uint8_t epioctl_r(offs_t addr);
+  void epioctl_w(offs_t addr, uint8_t value);
+  uint8_t epsysenb_r(offs_t addr);
+  void epsysenb_w(offs_t addr, uint8_t value);
+  uint8_t epintenb_r(offs_t addr);
+  void epintenb_w(offs_t addr, uint8_t value);
+  uint8_t epintstt_r(offs_t addr);
+  void epintctl_w(offs_t addr, uint8_t value);
+
+  void reel12_w(uint8_t data);
+  void reel34_w(uint8_t data);
+  void reel56_w(uint8_t data);
+};
+
+/*
+class maygay1b_state : public driver_device
+{
+public:
+	maygay1b_state(const machine_config &mconfig, device_type type, const char *tag) :
+		driver_device(mconfig, type, tag),
+		m_maincpu(*this, "maincpu"),
+		m_mcu(*this, "mcu"),
+		m_vfd(*this, "vfd"),
+		m_ay(*this, "aysnd"),
+		m_msm6376(*this, "msm6376"),
+		m_upd7759(*this, "upd"),
+		m_okim6295(*this, "oki"),
+		m_duart68681(*this, "duart68681"),
+		m_sw1_port(*this, "SW1"),
+		m_sw2_port(*this, "SW2"),
+		m_kbd_ports(*this, { "SW1", "SW2", "STROBE2", "STROBE3", "STROBE4", "STROBE5", "STROBE6", "STROBE7", }),
+		m_bank1(*this, "bank1"),
+		m_reels(*this, "reel%u", 0U),
+		m_meters(*this, "meters"),
+		m_oki_region(*this, "msm6376"),
+		m_lamps(*this, "lamp%u", 0U),
+		m_triacs(*this, "triac%u", 0U)
+	{
+	}
+
+	void maygay_m1_no_oki(machine_config &config);
+	void maygay_m1(machine_config &config);
+	void maygay_m1_nec(machine_config &config);
+	void maygay_m1_empire(machine_config &config);
+
+	void init_m1();
+	void init_m1common();
+	void init_m1nec();
+
+private:
+	required_device<cpu_device> m_maincpu;
+	required_device<i80c51_device> m_mcu;
+	optional_device<s16lf01_device> m_vfd;
+	required_device<ay8910_device> m_ay;
+	optional_device<okim6376_device> m_msm6376;
+	optional_device<upd7759_device> m_upd7759;
+	optional_device<okim6295_device> m_okim6295;
+	required_device<mc68681_device> m_duart68681;
+	required_ioport m_sw1_port;
+	required_ioport m_sw2_port;
+	required_ioport_array<8> m_kbd_ports;
+	required_memory_bank m_bank1;
+	required_device_array<stepper_device, 6> m_reels;
+	optional_device<meters_device> m_meters;
+	optional_region_ptr<uint8_t> m_oki_region;
+	output_finder<256> m_lamps;
+	output_finder<8> m_triacs;
+
+	uint8_t m_lamppos = 0;
+	int m_lamp_strobe = 0;
+	int m_old_lamp_strobe = 0;
+	int m_lamp_strobe2 = 0;
+	int m_old_lamp_strobe2 = 0;
+	int m_RAMEN = 0;
+	int m_ALARMEN = 0;
+	int m_PSUrelay = 0;
+	bool m_Vmm = false;
+	int m_WDOG = 0;
+	int m_NMIENABLE = 0;
+	int m_meter = 0;
+	TIMER_DEVICE_CALLBACK_MEMBER( maygay1b_nmitimer_callback );
+	uint8_t m_Lamps[256]{};
+	int m_optic_pattern = 0;
+	template <unsigned N> DECLARE_WRITE_LINE_MEMBER(reel_optic_cb) { if (state) m_optic_pattern |= (1 << N); else m_optic_pattern &= ~(1 << N); }
+	void scanlines_w(uint8_t data);
+	void scanlines_2_w(uint8_t data);
+	void lamp_data_w(uint8_t data);
+	void lamp_data_2_w(uint8_t data);
+	uint8_t kbd_r();
+	void reel12_w(uint8_t data);
+	void reel34_w(uint8_t data);
+	void reel56_w(uint8_t data);
+	DECLARE_WRITE_LINE_MEMBER(ramen_w);
+	DECLARE_WRITE_LINE_MEMBER(alarmen_w);
+	DECLARE_WRITE_LINE_MEMBER(nmien_w);
+	DECLARE_WRITE_LINE_MEMBER(rts_w);
+	DECLARE_WRITE_LINE_MEMBER(psurelay_w);
+	DECLARE_WRITE_LINE_MEMBER(wdog_w);
+	DECLARE_WRITE_LINE_MEMBER(srsel_w);
+	void latch_ch2_w(uint8_t data);
+	uint8_t latch_st_hi();
+	uint8_t latch_st_lo();
+	void m1ab_no_oki_w(uint8_t data);
+	void m1_pia_porta_w(uint8_t data);
+	void m1_pia_portb_w(uint8_t data);
+	void m1_lockout_w(uint8_t data);
+	void m1_meter_w(uint8_t data);
+	uint8_t m1_meter_r();
+	uint8_t m1_firq_clr_r();
+	uint8_t m1_firq_trg_r();
+	uint8_t m1_firq_nec_r();
+	uint8_t nec_reset_r();
+	void nec_bank0_w(uint8_t data);
+	void nec_bank1_w(uint8_t data);
+	DECLARE_WRITE_LINE_MEMBER(duart_irq_handler);
+	uint8_t m1_duart_r();
+	void mcu_port0_w(uint8_t data);
+	void mcu_port1_w(uint8_t data);
+	void mcu_port2_w(uint8_t data);
+	void mcu_port3_w(uint8_t data);
+	uint8_t mcu_port0_r();
+	uint8_t mcu_port2_r();
+
+	void main_to_mcu_0_w(uint8_t data);
+	void main_to_mcu_1_w(uint8_t data);
+
+	uint8_t m_main_to_mcu;
+
+	virtual void machine_start() override;
+	virtual void machine_reset() override;
+	void cpu0_firq(int data);
+	void cpu0_nmi();
+	void m1_memmap(address_map &map);
+	void m1_nec_memmap(address_map &map);
+};
+*/
+
+INPUT_PORTS_EXTERN( maygayep );
+
+#endif // MAME_MAYGAY_MAYGAYEP_H
