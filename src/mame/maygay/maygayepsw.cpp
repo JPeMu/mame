@@ -10105,3 +10105,15 @@ GAME( 199?, ep_twarp,   0,          maygayep,  maygayep, maygayep_state, init_ma
 GAME( 199?, ep_twarpa,  ep_twarp,   maygayep,  maygayep, maygayep_state, init_maygayep, ROT0, "Extreme",       "Time Warp (Extreme) (EPOCH) (TWRP 0.1, set 2)",EPOCH_GAME_FLAGS )
 GAME( 199?, ep_twarpb,  ep_twarp,   maygayep,  maygayep, maygayep_state, init_maygayep, ROT0, "Extreme",       "Time Warp (Extreme) (EPOCH) (TWRP 0.4, set 3)",EPOCH_GAME_FLAGS )
 GAME( 199?, ep_twarpc,  ep_twarp,   maygayep,  maygayep, maygayep_state, init_maygayep, ROT0, "Extreme",       "Time Warp (Extreme) (EPOCH) (TWRP 0.4, set 4)",EPOCH_GAME_FLAGS )
+
+ROM_START(ep_test)
+ROM_REGION(0x080000, "maincpu", 0)
+ROM_LOAD("APP3.BIN", 0x00000, 0x0392E,
+                CRC(0089f381) SHA1(6a60fab5305405b0aaf1d4fe84a9fc9b5909d89c))
+MISSING_SOUND
+ROM_END
+
+GAME(1998, ep_test, 0, maygayep, maygayep, maygayep_state, init_maygayep, ROT0,
+     "Custom", "Custom EPOCH Test ROM",
+     EPOCH_GAME_FLAGS)
+

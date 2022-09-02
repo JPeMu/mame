@@ -35,10 +35,10 @@
     =====================
 
     There is support for a total of 512 Lamps with up to 6 independent flash timers and
-    8 steps of dimming.
+    8 steps of dimming controlled globally.
 
     There is support for a total of 512 LED Segments, again with up to 6 independent
-    flash timers and 8 steps of dimming.
+    flash timers and 8 steps of dimming controlled globally.
 
     The Gate Array generates a pair of timer interrupts (when enabled). A 6.4kHz
     "refresh" timer, and a 100Hz sync timer. All of these are presented to the CPU
@@ -84,7 +84,8 @@
      -W  FE1003 = Coin Diverts
      -W  FE1004 = Reel 1+2 Outputs
      -W  FE1005 = Reel 3+4 Outputs
-     -W  FE1006 = Hopper Control + Note Acceptor
+     -W  FE1006 = Note Acceptor + Meters?
+     -W  FE1007 = HopperDrive
 
     ------------------------------------------------------------------------------------
     FE1200 - FE120B = Lamp Flash-Rate Timer Area
@@ -101,7 +102,10 @@
 
     FE121A - FE121B = Option Switches
 
-    FE121C - FEFFFF = RAM?
+    FE121C - FEFFFF = RAM? NVRAM even?
+
+    FFFC00 - FFFC00 = Read/Write YMZ280 Register Number
+    FFFC02 - FFFC02 = Read/Write YMZ280 Register Data
 
     ==================================================================================
     SYSTEM REGISTERS
@@ -116,6 +120,7 @@
     FFFF11 - FFFF11 = (EPSYSCTL)                System Status/Control Register
         x... ....       MASRES                      Force Primary, Boot and Security Reset 
         .x.. ....       TRGRES                      Force Primary and Boot Reset
+        .... ..x.                                   Status LED
 
     FFFF12 - FFFF12 = (EPIOCTL)                 I/O Control Register
     
@@ -153,9 +158,6 @@
     FFFF1A - FFFF1A = (EPPCIUAR)                PCI Upper Address Register
     FFFF1B - FFFF1B = (EPGATEID)                Gate ID Register
 
-    FFFFC0 - FFFFC0 = Read/Write YMZ280 Register Number
-    FFFFC2 - FFFFC2 = Read/Write YMZ280 Register Data
-
     OTHER DEVICES
     =============
 
@@ -185,13 +187,41 @@
 #define INT_INPUT 0x01
 
 
+unsigned char ascokitab[64] = {
+	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,		// 00 - 07
+	0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,		// 08 - 1f
+	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,		// 10 - 17
+	0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,		// 18 - 1f
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,		// 20 - 27
+	0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,		// 28 - 2f
+	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,		// 30 - 37
+	0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f		// 38 - 3f
+};
+
 void maygayep_state::machine_start() {
-     printf("maygayep::machine_start\n");
+  logerror("maygayep::machine_start\n");
 	m_lamps.resolve();
+  m_leds.resolve();
 }
 
 void maygayep_state::machine_reset() {
-     printf("maygayep::machine_reset\n");
+  logerror("maygayep::machine_reset\n");
+  ep_int_enable = 0;
+  ep_int_status = 0;
+  ep_sys_enable = 0;
+  ep_sys_control = 0;
+  ep_sys_status = 0;
+  ep_io_control = 0;
+
+  ep_led_dim_level = 0;
+  ep_lamp_dim_level = 0;
+  for (int i = 0; i < 8; i++) {
+    ep_led_timers[i] = 0;
+    ep_lamp_timers[i] = 0;
+    ep_reel_drives[i] = 0;
+  }
+
+  ep_last_read_int_status = 0;
 }
 
 INTERRUPT_GEN_MEMBER(maygayep_state::external_interrupt)
@@ -202,29 +232,29 @@ INTERRUPT_GEN_MEMBER(maygayep_state::external_interrupt)
 // NMI is periodic? or triggered by a write?
 TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::refreshtimer )
 {
-  if (ep_int_enable & INT_REFRESH) {
-    if (!(ep_int_status & INT_REFRESH)) {
-      ep_int_status |= INT_REFRESH;
+  if (!(ep_int_status & INT_REFRESH)) {
+    ep_int_status |= INT_REFRESH;
 
-      raise_ext_irq5();
+    if (ep_int_enable & INT_REFRESH) {
+        raise_ext_irq5();
     }
   }
 }
 
 TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::synctimer )
 {
-  if (ep_int_enable & INT_SYNC) {
-    if (!(ep_int_status & INT_SYNC)) {
-      ep_int_status |= INT_SYNC;
+  if (!(ep_int_status & INT_SYNC)) {
+    ep_int_status |= INT_SYNC;
 
-      raise_ext_irq5();
+    if (ep_int_enable & INT_SYNC) {
+        raise_ext_irq5();
     }
   }
 }
 
 void maygayep_state::raise_ext_irq5(void) {
   // TODO
-  printf("Should be raising INT5!\n");
+  logerror("Should be raising INT5!\n");
   m_maincpu->pulse_input_line(5, m_maincpu->minimum_quantum_time());
   
 }
@@ -232,12 +262,23 @@ void maygayep_state::raise_ext_irq5(void) {
 // bp 29e58 in ep_simp reads the 'INITIALISE . . .' string
 void maygayep_state::maygayep_map(address_map &map) {
   map.global_mask(0xFFFFFF);
+
   map(0x000000, 0x07FFFF).rom().region("maincpu", 0);
   map(0xFE0000, 0xFE07FF).ram().share("nvram"); // merln at least?
 
   map(0xFE0800, 0xFE09FF).rw(FUNC(maygayep_state::lamps_read), FUNC(maygayep_state::lamps_write));
   map(0xFE0A00, 0xFE0BFF).rw(FUNC(maygayep_state::leds_read), FUNC(maygayep_state::leds_write));
+  map(0xFE0C00, 0xFE0DFF).rw(FUNC(maygayep_state::inputs_read), FUNC(maygayep_state::inputs_write));
+  map(0xFE0E00, 0xFE0FFF).rw(FUNC(maygayep_state::input_int_read), FUNC(maygayep_state::input_int_write));
 
+  map(0xFE1000, 0xFE1007).rw(FUNC(maygayep_state::misc_read), FUNC(maygayep_state::misc_write));
+  map(0xFE1200, 0xFE1219).rw(FUNC(maygayep_state::fade_dim_read), FUNC(maygayep_state::fade_dim_write));
+
+  map(0xFE121C, 0xFEFFFF).ram(); // ?
+
+  map(0xFFFC00, 0xFFFC02).rw(FUNC(maygayep_state::ymz_read), FUNC(maygayep_state::ymz_write));
+
+  // EPOCH System Registers
   map(0xFFFF10, 0xFFFF10).rw(FUNC(maygayep_state::epsysstt_r), FUNC(maygayep_state::epsysstt_w));
   map(0xFFFF11, 0xFFFF11).rw(FUNC(maygayep_state::epsysctl_r), FUNC(maygayep_state::epsysctl_w));
   map(0xFFFF12, 0xFFFF12).rw(FUNC(maygayep_state::epioctl_r), FUNC(maygayep_state::epioctl_w));
@@ -245,23 +286,37 @@ void maygayep_state::maygayep_map(address_map &map) {
   map(0xFFFF14, 0xFFFF14).rw(FUNC(maygayep_state::epintenb_r), FUNC(maygayep_state::epintenb_w));
   map(0xFFFF15, 0xFFFF15).rw(FUNC(maygayep_state::epintstt_r), FUNC(maygayep_state::epintctl_w));
 
-  map(0xFE121C, 0xFEFFFF).ram(); // merln at least?
+}
+
+uint8_t maygayep_state::ymz_read(offs_t addr) {
+  uint8_t value = m_ymz->read(addr >> 1);
+  logerror("Read %02x from YMZ280 offset %d\n", value, addr);
+  return value;
+}
+
+void maygayep_state::ymz_write(offs_t addr, uint8_t value) {
+  logerror("Wrote %02x to YMZ280 offset %d\n", value, addr);
+  m_ymz->write(addr >> 1, value);
 }
 
 uint8_t maygayep_state::epsysstt_r(offs_t addr) {
-  return 0xff;
+  logerror("Read %02x from EPSYSSTT\n", ep_sys_status);
+  return ep_sys_status;
 }
 
 uint8_t maygayep_state::epsysctl_r(offs_t addr) {
-  return 0xff;
+  logerror("Read from EPSYSCTL\n");
+  return ep_sys_control;
 }
 
 uint8_t maygayep_state::epioctl_r(offs_t addr) {
-  return 0xff;
+  logerror("Read from EPIOCTL\n");
+  return ep_io_control;
 }
 
 uint8_t maygayep_state::epsysenb_r(offs_t addr) {
-  return 0xff;
+  // logerror("Read from EPSYSENB\n");
+  return ep_sys_enable;
 }
 
 uint8_t maygayep_state::epintenb_r(offs_t addr) {
@@ -269,28 +324,35 @@ uint8_t maygayep_state::epintenb_r(offs_t addr) {
 }
 
 uint8_t maygayep_state::epintstt_r(offs_t addr) {
+  ep_int_status &= ((~ep_last_read_int_status) | ep_int_enable);
   ep_last_read_int_status = ep_int_status;
   return ep_int_status;
 }
 
 void maygayep_state::epsysstt_w(offs_t addr, uint8_t value) {
-  printf("Wrote %02x to EPSYSSTT\n", value);
+  logerror("Wrote %02x to EPSYSSTT\n", value);
+  ep_sys_status = value;
+  m_lamps[1] = (value & 0x02) >> 1;
 }
 
 void maygayep_state::epsysctl_w(offs_t addr, uint8_t value) {
-  printf("Wrote %02x to EPSYSCTL\n", value);
+  logerror("Wrote %02x to EPSYSCTL\n", value);
+  ep_sys_control = value;
 }
 
 void maygayep_state::epioctl_w(offs_t addr, uint8_t value) {
-  printf("Wrote %02x to EPIOCTL\n", value);
+  logerror("Wrote %02x to EPIOCTL\n", value);
+  ep_io_control = value;
+  m_lamps[2] = (value & 0x02) >> 1;
 }
 
 void maygayep_state::epsysenb_w(offs_t addr, uint8_t value) {
-  // printf("Wrote %02x to EPSYSENB\n", value);
+  // logerror("Wrote %02x to EPSYSENB\n", value);
+  ep_sys_enable = value;
 }
 
 void maygayep_state::epintenb_w(offs_t addr, uint8_t value) {
-  printf("Wrote %02x to EPINTENB\n", value);
+  logerror("Wrote %02x to EPINTENB\n", value);
   ep_int_enable = value;
 }
 
@@ -302,36 +364,193 @@ void maygayep_state::epintctl_w(offs_t addr, uint8_t value) {
   uint8_t masked_bits = ep_last_read_int_status & value;
   ep_int_status &= ~masked_bits;
 
-  printf("Wrote %02x to EPINTCTL. Clearing: %02x\n", value, masked_bits);
+  logerror("Wrote %02x to EPINTCTL. Clearing: %02x\n", value, masked_bits);
+  for (int i = 0; i < 8; i++) {
+    m_lamps[128 + i] = BIT(value, i);
+  }
 }
 
 
+/*
+  There are 512 lamps which can be both read and written
+*/
 uint8_t maygayep_state::lamps_read(offs_t addr) {
-    return 0xff;
+    return m_lamps[addr];
 }
 
 void maygayep_state::lamps_write(offs_t addr, uint8_t value) {
-  // printf("Wrote %02x to lamp %d\n", value, addr);
+  // logerror("Wrote %02x to lamp %d\n", value, addr);
+  m_lamps[addr] = value & 1;
 }
 
-uint8_t maygayep_state::leds_read(offs_t addr) {
+
+uint8_t maygayep_state::misc_read(offs_t addr) {
+  uint8_t value = 0x00;
+
+  switch(addr) {
+    case 4: // Reels 1+2
+      value = ep_reel_drives[0] | (ep_reel_drives[1] << 4);
+      break;
+    case 5: // Reels 3+4
+      value = ep_reel_drives[1] | (ep_reel_drives[2] << 4);
+      break;
+  }
+
+  return value;
+}
+
+void maygayep_state::misc_write(offs_t addr, uint8_t value) {
+  switch(addr) {
+    case 0: // Alpha
+      logerror("Alpha output: %02x [%c]\n", value, ascokitab[value & 0x3f]);
+      break;
+    case 4: // Reels 1+2
+      ep_reel_drives[0] = value & 0x0f;
+      ep_reel_drives[1] = (value >> 4) & 0x0f;
+      reel12_w(value);
+      break;
+    case 5: // Reels 3+4
+      ep_reel_drives[2] = value & 0x0f;
+      ep_reel_drives[3] = (value >> 4) & 0x0f;
+      reel34_w(value);
+      break;
+    default:
+      logerror("Wrote %02x to MISC %08x\n", value, addr);
+      for (int i = 0; i < 8; i++) {
+        int base = 128 + ((addr & 0x07) * 8);
+        m_lamps[base + i] = BIT(value, i);
+      }
+  }
+}
+
+uint8_t maygayep_state::inputs_read(offs_t addr) {
+  if (addr == 4) {
+    return ((m_optic_pattern << 4) & 0xf0) | 0x01;
+  }
+
+  return 0xff;
+}
+
+void maygayep_state::inputs_write(offs_t addr, uint8_t value) {
+  // logerror("Wrote %02x to INPUTS %d\n", value, addr);
+}
+
+uint8_t maygayep_state::input_int_read(offs_t addr) {
     return 0xff;
 }
 
+void maygayep_state::input_int_write(offs_t addr, uint8_t value) {
+  logerror("Wrote %02x to INPUT INTERRUPTS %d\n", value, addr);
+}
+
+uint8_t maygayep_state::leds_read(offs_t addr) {
+    return m_leds[addr];
+}
+
 void maygayep_state::leds_write(offs_t addr, uint8_t value) {
-  // printf("Wrote %02x to LED %d\n", value, addr);
+  // logerror("Wrote %02x to LED %d\n", value, addr);
+  m_leds[addr] = value & 1;
+}
+
+/*
+  Lamp/LED Flash and Dim control
+*/
+uint8_t maygayep_state::fade_dim_read(offs_t addr) {
+  uint8_t value = 0x00;
+
+  switch(addr) {
+    case 0x18: // Lamp Dimmer
+      // Only the lowest 3 bits are used
+      value = ep_lamp_dim_level;
+      break;
+    case 0x19: // LED Dimmer
+      // Only the lowest 3 bits are used
+      value = ep_led_dim_level;
+      break;
+    default:
+      uint16_t timer_value = 0;
+      if (addr < 0x0c) {
+        // Lamp Flash Timers
+        timer_value = ep_lamp_timers[addr >> 1];
+      } else {
+        // LED Flash Timers
+        timer_value = ep_led_timers[addr >> 1];
+      }
+      value = (addr & 1) ? (timer_value & 0xff00) >> 8 : timer_value & 0xff;
+      break;
+  }
+
+  return value;
+}
+
+void maygayep_state::fade_dim_write(offs_t addr, uint8_t value) {
+  // logerror("Wrote %02x to LED %d\n", value, addr);
+
+  switch(addr) {
+    case 0x18: // Lamp Dimmer
+      // Only the lowest 3 bits are used
+      ep_lamp_dim_level = value & 0x07;
+      logerror("Set Lamp Dim to %02x\n", ep_lamp_dim_level);
+      break;
+    case 0x19: // LED Dimmer
+      // Only the lowest 3 bits are used
+      ep_led_dim_level = value & 0x07;
+      logerror("Set LED Dim to %02x\n", ep_led_dim_level);
+      break;
+    default:
+      uint16_t* timer = NULL;
+      char timer_name[10];
+      if (addr < 0x0c) {
+        // Lamp Flash Timers
+        uint8_t timer_num = (addr >> 1) & 0x07;
+        timer = &ep_lamp_timers[addr >> 1];
+        sprintf(timer_name, "LAMP%1d", timer_num);
+      } else {
+        // LED Flash Timers
+        uint8_t timer_num = ((addr - 0x0c) >> 1) & 0x07;
+        timer = &ep_led_timers[(addr - 0x0c) >> 1];
+        sprintf(timer_name, "LED%1d", timer_num);
+      }
+
+      if (timer) {
+        if (addr & 1) {
+          *timer &= 0xff;
+          *timer |= (value << 8) & 0xff;
+        } else {
+          *timer &= 0xff00;
+          *timer |= value & 0xff;
+        }
+
+        logerror("Set timer %s to %d\n", timer_name, *timer);
+      }
+  }
 }
 
 void maygayep_state::reel12_w(uint8_t data) {
-  printf("Wrote %02x to Reels 1/2\n", data);
+  // logerror("Wrote %02x to Reels 1/2\n", data);
+	m_reels[0]->update( data     & 0x0F);
+	m_reels[1]->update((data>>4) & 0x0F);
+
+	awp_draw_reel(machine(),"reel1", *m_reels[0]);
+	awp_draw_reel(machine(),"reel2", *m_reels[1]);
 }
 
 void maygayep_state::reel34_w(uint8_t data) {
-  printf("Wrote %02x to Reels 3/4\n", data);
+  // logerror("Wrote %02x to Reels 3/4\n", data);
+	m_reels[2]->update( data     & 0x0F);
+	m_reels[3]->update((data>>4) & 0x0F);
+
+	awp_draw_reel(machine(),"reel3", *m_reels[2]);
+	awp_draw_reel(machine(),"reel4", *m_reels[3]);
 }
 
 void maygayep_state::reel56_w(uint8_t data) {
-  printf("Wrote %02x to Reels 5/6\n", data);
+  // logerror("Wrote %02x to Reels 5/6\n", data);
+	m_reels[4]->update( data     & 0x0F);
+	m_reels[5]->update((data>>4) & 0x0F);
+
+	awp_draw_reel(machine(),"reel5", *m_reels[4]);
+	awp_draw_reel(machine(),"reel6", *m_reels[5]);
 }
 
 INPUT_PORTS_START(maygayep)
@@ -402,25 +621,21 @@ INPUT_PORTS_END
 */
 
 void maygayep_state::init_maygayep() {
-  ep_int_enable = 0;
-  ep_int_status = 0;
-  ep_last_read_int_status = 0;
-
   uint8_t *src = memregion("maincpu")->base();
   for (int i = 0x100; i < 0x210; i++) {
     uint8_t val = src[i ^ 1];
 
     if (i % 0x40 == 0)
-      printf("\n");
+      logerror("\n");
 
     if ((val >= 0x20) && (val <= 0x7e)) {
-      printf("%c", val);
+      logerror("%c", val);
     } else {
-      printf(" ");
+      logerror(" ");
     }
   }
 
-  printf("\n");
+  logerror("\n");
 }
 
 void maygayep_state::maygayep(machine_config &config) {
@@ -429,7 +644,10 @@ void maygayep_state::maygayep(machine_config &config) {
 
   SPEAKER(config, "lspeaker").front_left();
   SPEAKER(config, "rspeaker").front_right();
-  YMZ280B(config, "ymz", 10000000).add_route(ALL_OUTPUTS, "mono", 1.0);
+
+	YMZ280B(config, m_ymz, 10000000);
+	m_ymz->add_route(ALL_OUTPUTS, "lspeaker", 1.0); // Channel 0
+	m_ymz->add_route(ALL_OUTPUTS, "rspeaker", 1.0); // Channel 1
 
   TIMER(config, "refreshtimer").configure_periodic(FUNC(maygayep_state::refreshtimer), attotime::from_hz(6400));
   TIMER(config, "synctimer").configure_periodic(FUNC(maygayep_state::synctimer), attotime::from_hz(100));

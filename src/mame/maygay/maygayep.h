@@ -27,7 +27,9 @@ public:
       m_vfd(*this, "vfd"),
       m_reels(*this, "reel%u", 0U),
       m_meters(*this, "meters"),
-      m_lamps(*this, "lamp%u", 0U)
+      m_lamps(*this, "lamp%u", 0U),
+      m_leds(*this, "led%u", 0U),
+      m_ymz(*this, "ymz")
   {    
   }
 
@@ -45,14 +47,24 @@ private:
 	required_device_array<stepper_device, 6> m_reels;
 	optional_device<meters_device> m_meters;
 	output_finder<512> m_lamps;
+	output_finder<512> m_leds;
+	required_device<ymz280b_device> m_ymz;
 
   // Internal
   uint8_t ep_int_enable;
   uint8_t ep_int_status;
+  uint8_t ep_sys_control;
+  uint8_t ep_sys_status;
+  uint8_t ep_io_control;
   uint8_t ep_last_read_int_status;
+  uint8_t ep_sys_enable;
+  uint16_t ep_led_timers[8];
+  uint16_t ep_lamp_timers[8];
+  uint8_t ep_led_dim_level;
+  uint8_t ep_lamp_dim_level;
+  uint8_t ep_reel_drives[8];
 	
   // Hardware
-  uint8_t m_Lamps[512]{};
 	int m_optic_pattern = 0;
 
 	virtual void machine_start() override;
@@ -66,10 +78,26 @@ private:
 
   void raise_ext_irq5(void);
   void maygayep_map(address_map &map);
+  
+  uint8_t ymz_read(offs_t addr);
+  void ymz_write(offs_t addr, uint8_t value);
+  uint8_t inputs_read(offs_t addr);
+  void inputs_write(offs_t addr, uint8_t value);
+  uint8_t input_int_read(offs_t addr);
+  void input_int_write(offs_t addr, uint8_t value);
   uint8_t lamps_read(offs_t addr);
   void lamps_write(offs_t addr, uint8_t value);
   uint8_t leds_read(offs_t addr);
   void leds_write(offs_t addr, uint8_t value);
+  uint8_t misc_read(offs_t addr);
+  void misc_write(offs_t addr, uint8_t value);
+  uint8_t fade_dim_read(offs_t addr);
+  void fade_dim_write(offs_t addr, uint8_t value);
+
+  void reel12_w(uint8_t data);
+  void reel34_w(uint8_t data);
+  void reel56_w(uint8_t data);
+  
   uint8_t epsysstt_r(offs_t addr);
   void epsysstt_w(offs_t addr, uint8_t value);
   uint8_t epsysctl_r(offs_t addr);
@@ -83,9 +111,6 @@ private:
   uint8_t epintstt_r(offs_t addr);
   void epintctl_w(offs_t addr, uint8_t value);
 
-  void reel12_w(uint8_t data);
-  void reel34_w(uint8_t data);
-  void reel56_w(uint8_t data);
 };
 
 /*
