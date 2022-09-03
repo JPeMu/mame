@@ -11,8 +11,12 @@
     YMZ280B sound
 
     2x PICs for security
-    the PIC marked 'Security' is apparently the RTC, and doesn't change
-    the other is per game / manufacturer and provides data needed for booting?
+    the PIC marked 'Security' is apparently the RTC, and doesn't change. The security
+    aspect is that it is responsible for power-off monitoring of secure inputs (eg doors).
+
+    the other is per game / manufacturer and provides data needed for booting. It handles
+    EPROM sizing apparently, as well as an ability to manage boot-up sequence, system
+    configuration and security tasks?
 
     The majority of system tasks are handled by a custom ASIC which is capable
     of reading and writing directly from/to the main RAM.  This includes handling of
@@ -34,11 +38,36 @@
     TECHNICAL INFORMATION
     =====================
 
+    CPU: HD6413002FN16 (H8-3002) CPU @ 16MHz
+    RAM: 64KB On-Board Battery-Backed SRAM
+    GAME: 4MB Socketed EPROM, Expandable to 8MB with adapter
+          2MB Sound EPROM
+    EEPROM: 64KB Socketed EEPROM (24C65). Managed over I2C by the ASIC.
+    SOUND: 8-Channel Stereo YMZ280B with s/w controlled Volume and Pan
+    RTC: Real time clock with leap-year and summer-time support
+
     There is support for a total of 512 Lamps with up to 6 independent flash timers and
     8 steps of dimming controlled globally.
 
     There is support for a total of 512 LED Segments, again with up to 6 independent
     flash timers and 8 steps of dimming controlled globally.
+
+    Up to 4096 direct inputs. Read into RAM at 6400/sec. All inputs can generate
+    individual interrupts with selectable active level.
+
+    Up to 4096 direct outputs. Refreshed at up to 6400/sec. Current detection optional\
+    on any output. Any outputs may be dedicated to reel drives.
+
+    Configurable matrix display devices. 2 hardware controlled display planes. All dot
+    points have 4 levels of independent and 80 levels of collective brightness control.
+    The display port is operated as 105 pixels x 28 rows by 7 plane times giving each
+    pixel 4 brightness levels. Data clocked at 820kbps.
+
+
+
+    IOLINK: The internal bus runs at 571kHz and can service all external resources
+    in 128uSecs. System processor has no connection to this bus as it is all managed
+    by the ASIC. 
 
     The Gate Array generates a pair of timer interrupts (when enabled). A 6.4kHz
     "refresh" timer, and a 100Hz sync timer. All of these are presented to the CPU
@@ -186,6 +215,7 @@
 #define INT_AUDIO 0x02
 #define INT_INPUT 0x01
 
+#define CPU_CLOCK XTAL(16'000'000)
 
 unsigned char ascokitab[64] = {
 	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,		// 00 - 07
@@ -224,11 +254,6 @@ void maygayep_state::machine_reset() {
   ep_last_read_int_status = 0;
 }
 
-INTERRUPT_GEN_MEMBER(maygayep_state::external_interrupt)
-{
-  device.execute().pulse_input_line(5, device.execute().minimum_quantum_time());
-}
-
 // NMI is periodic? or triggered by a write?
 TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::refreshtimer )
 {
@@ -253,10 +278,8 @@ TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::synctimer )
 }
 
 void maygayep_state::raise_ext_irq5(void) {
-  // TODO
-  logerror("Should be raising INT5!\n");
+  //logerror("Should be raising INT5!\n");
   m_maincpu->pulse_input_line(5, m_maincpu->minimum_quantum_time());
-  
 }
 
 // bp 29e58 in ep_simp reads the 'INITIALISE . . .' string
@@ -286,6 +309,17 @@ void maygayep_state::maygayep_map(address_map &map) {
   map(0xFFFF14, 0xFFFF14).rw(FUNC(maygayep_state::epintenb_r), FUNC(maygayep_state::epintenb_w));
   map(0xFFFF15, 0xFFFF15).rw(FUNC(maygayep_state::epintstt_r), FUNC(maygayep_state::epintctl_w));
 
+  map(0xFFFF18, 0xFFFF19).rw(FUNC(maygayep_state::dips_r), FUNC(maygayep_state::dummy_write));
+}
+
+void maygayep_state::dummy_write(offs_t addr, uint8_t value)
+{
+  // Dummy write handler
+}
+
+uint8_t maygayep_state::dips_r(offs_t addr)
+{
+  return (addr & 1) ? m_sw2_port->read() : m_sw1_port->read();
 }
 
 uint8_t maygayep_state::ymz_read(offs_t addr) {
@@ -332,7 +366,7 @@ uint8_t maygayep_state::epintstt_r(offs_t addr) {
 void maygayep_state::epsysstt_w(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to EPSYSSTT\n", value);
   ep_sys_status = value;
-  m_lamps[1] = (value & 0x02) >> 1;
+  //m_lamps[1] = (value & 0x02) >> 1;
 }
 
 void maygayep_state::epsysctl_w(offs_t addr, uint8_t value) {
@@ -343,7 +377,7 @@ void maygayep_state::epsysctl_w(offs_t addr, uint8_t value) {
 void maygayep_state::epioctl_w(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to EPIOCTL\n", value);
   ep_io_control = value;
-  m_lamps[2] = (value & 0x02) >> 1;
+  //m_lamps[2] = (value & 0x02) >> 1;
 }
 
 void maygayep_state::epsysenb_w(offs_t addr, uint8_t value) {
@@ -366,7 +400,7 @@ void maygayep_state::epintctl_w(offs_t addr, uint8_t value) {
 
   logerror("Wrote %02x to EPINTCTL. Clearing: %02x\n", value, masked_bits);
   for (int i = 0; i < 8; i++) {
-    m_lamps[128 + i] = BIT(value, i);
+    //m_lamps[128 + i] = BIT(value, i);
   }
 }
 
@@ -394,6 +428,9 @@ uint8_t maygayep_state::misc_read(offs_t addr) {
     case 5: // Reels 3+4
       value = ep_reel_drives[1] | (ep_reel_drives[2] << 4);
       break;
+    default:
+      logerror("Read from MISC %08x\n", addr);
+      break;
   }
 
   return value;
@@ -417,8 +454,8 @@ void maygayep_state::misc_write(offs_t addr, uint8_t value) {
     default:
       logerror("Wrote %02x to MISC %08x\n", value, addr);
       for (int i = 0; i < 8; i++) {
-        int base = 128 + ((addr & 0x07) * 8);
-        m_lamps[base + i] = BIT(value, i);
+        //int base = 128 + ((addr & 0x07) * 8);
+        //m_lamps[base + i] = BIT(value, i);
       }
   }
 }
@@ -555,13 +592,13 @@ void maygayep_state::reel56_w(uint8_t data) {
 
 INPUT_PORTS_START(maygayep)
 	PORT_START("SW1")
-	PORT_DIPNAME( 0x01, 0x00, "SW101" ) PORT_DIPLOCATION("SW1:01")
+	PORT_DIPNAME( 0x01, 0x00, "Clear Credit on Reset" ) PORT_DIPLOCATION("SW1:01")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x01, DEF_STR( On  ) )
 	PORT_DIPNAME( 0x02, 0x00, "SW102" ) PORT_DIPLOCATION("SW1:02")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x02, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x04, 0x00, "SW103" ) PORT_DIPLOCATION("SW1:03")
+	PORT_DIPNAME( 0x04, 0x00, "Multi/Single Credit" ) PORT_DIPLOCATION("SW1:03")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x04, DEF_STR( On  ) )
 	PORT_DIPNAME( 0x08, 0x00, "SW104" ) PORT_DIPLOCATION("SW1:04")
@@ -573,10 +610,10 @@ INPUT_PORTS_START(maygayep)
 	PORT_DIPNAME( 0x20, 0x00, "SW106" ) PORT_DIPLOCATION("SW1:06")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x20, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x40, 0x00, "SW107" ) PORT_DIPLOCATION("SW1:07")
+	PORT_DIPNAME( 0x40, 0x00, "Payout After Win" ) PORT_DIPLOCATION("SW1:07")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x40, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x80, 0x00, "AntiFraud Protection" ) PORT_DIPLOCATION("SW1:08")
+	PORT_DIPNAME( 0x80, 0x00, "SW108" ) PORT_DIPLOCATION("SW1:08")
 	PORT_DIPSETTING(    0x80, DEF_STR( Off  ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 
@@ -587,25 +624,122 @@ INPUT_PORTS_START(maygayep)
 	PORT_DIPNAME( 0x02, 0x00, "SW202" ) PORT_DIPLOCATION("SW2:02")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x02, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x04, 0x00, "SW203" ) PORT_DIPLOCATION("SW2:03")
+	PORT_DIPNAME( 0x04, 0x00, "Bank Limit" ) PORT_DIPLOCATION("SW2:03")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x04, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x08, 0x00, "SW204" ) PORT_DIPLOCATION("SW2:04")
+	PORT_DIPNAME( 0x08, 0x00, "Credit Limit" ) PORT_DIPLOCATION("SW2:04")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x08, DEF_STR( On  ) )
 	PORT_DIPNAME( 0x10, 0x00, "SW205" ) PORT_DIPLOCATION("SW2:05")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x10, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x20, 0x00, "SW206" ) PORT_DIPLOCATION("SW2:06")
+	PORT_DIPNAME( 0x20, 0x00, "Free Credit Inhibit" ) PORT_DIPLOCATION("SW2:06")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x20, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x40, 0x00, "SW207" ) PORT_DIPLOCATION("SW2:07")
+	PORT_DIPNAME( 0x40, 0x00, "Extended Refill Inhibit" ) PORT_DIPLOCATION("SW2:07")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x40, DEF_STR( On  ) )
-	PORT_DIPNAME( 0x80, 0x00, "SW208" ) PORT_DIPLOCATION("SW2:08")
+	PORT_DIPNAME( 0x80, 0x00, "Attract Mode Brightness" ) PORT_DIPLOCATION("SW2:08")
 	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x80, DEF_STR( On  ) )
+
+  /*
+    Stakes and Prizes
+    Combo1
+      0 0000 '5p'
+      1 0001 '10p'
+      2 0010 '20p'
+      3 0011 '25p'
+      4 0100 '30p'
+      5 0101 '40p'
+      6 0110 '50p'
+      7 0111 #163'1')
+    Combo2
+      0 0000 '---'
+      1 0001 '3C'
+      2 0010 '4C'
+      3 0011 '5C'
+      4 0100 '6C'
+      5 0101 '6T'
+      6 0110 '8C'
+      7 0111 '8T'
+      8 1000 '10C'
+      9 1001 '15C'
+      10 1010 '25C'
+      11 1011 '25LBO'
+      12 1100 '35C'
+      13 1101 '70C')
+
+    xx.. ....   1100 0000
+    ..xx ....   ?? Prize bits 1+0 ?
+    .... x...   Stake bit 0
+    .... .x..   Mech drive bit 1 = Stake bit 2 else Stake bit 1
+    .... ..xx   Prize bits 3+2
+  */
+
+	PORT_START("SPKEY")
+	
+  PORT_CONFNAME( 0x33, 0x12, "Jackpot / Prize Key" )
+	PORT_CONFSETTING(    0x33, "0x33"  )
+	PORT_CONFSETTING(    0x32, "25 GPB LBO"  )
+	PORT_CONFSETTING(    0x31, "8 GBP Tokens"  )
+	PORT_CONFSETTING(    0x30, "5 GBP Cash"  )
+	PORT_CONFSETTING(    0x23, "0x23"  )
+	PORT_CONFSETTING(    0x22, "25 GBP Cash"  )
+	PORT_CONFSETTING(    0x21, "8 GBP Cash"  )
+	PORT_CONFSETTING(    0x20, "4 GBP Cash"  )
+	PORT_CONFSETTING(    0x13, "70 GBP Cash"  )
+	PORT_CONFSETTING(    0x12, "15 GBP Cash"  )
+	PORT_CONFSETTING(    0x11, "6 GBP Tokens"  )
+	PORT_CONFSETTING(    0x10, "3 GBP Cash"  )
+	PORT_CONFSETTING(    0x03, "35 GBP Cash"  )
+	PORT_CONFSETTING(    0x02, "10 GBP Cash"  )
+	PORT_CONFSETTING(    0x01, "6 GBP Cash"  )
+	PORT_CONFSETTING(    0x00, "Not Fitted"  )
+	
+  PORT_CONFNAME( 0x0c, 0x0c, "Stake Key" )
+	PORT_CONFSETTING(    0x00, "0x00" )
+	PORT_CONFSETTING(    0x04, "0x04" )
+	PORT_CONFSETTING(    0x08, "0x08" )
+	PORT_CONFSETTING(    0x0b, "20p" )
+	
+  PORT_CONFNAME( 0x40, 0x40, DEF_STR( Unknown ) )
+	PORT_CONFSETTING(    0x00, DEF_STR( On ) )
+	PORT_CONFSETTING(    0x40, DEF_STR( Off ) )
+
+  PORT_CONFNAME( 0x80, 0x80, DEF_STR( Unknown ) )
+	PORT_CONFSETTING(    0x00, DEF_STR( On ) )
+	PORT_CONFSETTING(    0x80, DEF_STR( Off ) )
+
 INPUT_PORTS_END
+
+/*
+  Possible switches:
+  1 = Cancel
+  2 = Hold1
+  3 = Hold2
+  4 = Hold3
+  5 = Hold4
+  6 = Exchange
+  7 = Gamble
+
+  9 = Cash Button
+
+  41 = Hopper Ver 1
+  42 = Hooper Ver 2
+  43 = Hopper Low 1
+  44 = Hopper High 1
+  45 = Hopper Low 2
+  46 = Hopper High 2
+
+  53 = Hopper Defloat
+  54 = Refill
+  56 = Cash Box Door
+
+  57 = Top Door
+  63 = Hopper Refloat
+  64 = Test
+*/
 
 /* in many sets the 0x100 - 0x1ff area contains revision information
     and sometimes bugfix notes..
@@ -639,7 +773,7 @@ void maygayep_state::init_maygayep() {
 }
 
 void maygayep_state::maygayep(machine_config &config) {
-  H83002(config, m_maincpu, 16000000);
+  H83002(config, m_maincpu, CPU_CLOCK);
   m_maincpu->set_addrmap(AS_PROGRAM, &maygayep_state::maygayep_map);
 
   SPEAKER(config, "lspeaker").front_left();

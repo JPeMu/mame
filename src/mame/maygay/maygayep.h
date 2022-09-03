@@ -72,7 +72,6 @@ private:
 
   TIMER_DEVICE_CALLBACK_MEMBER( refreshtimer ); // 6.4 kHz Refresh Timer
   TIMER_DEVICE_CALLBACK_MEMBER( synctimer );    // 100Hz Sync Timer
-  INTERRUPT_GEN_MEMBER(external_interrupt);
 
 	template <unsigned N> DECLARE_WRITE_LINE_MEMBER(reel_optic_cb) { if (state) m_optic_pattern |= (1 << N); else m_optic_pattern &= ~(1 << N); }
 
@@ -93,6 +92,8 @@ private:
   void misc_write(offs_t addr, uint8_t value);
   uint8_t fade_dim_read(offs_t addr);
   void fade_dim_write(offs_t addr, uint8_t value);
+  uint8_t dips_r(offs_t addr);
+  void dummy_write(offs_t addr, uint8_t value);
 
   void reel12_w(uint8_t data);
   void reel34_w(uint8_t data);
