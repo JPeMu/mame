@@ -10113,7 +10113,18 @@ ROM_LOAD("APP3.BIN", 0x00000, 0x0392E,
 MISSING_SOUND
 ROM_END
 
+ROM_START(ep_test1)
+ROM_REGION(0x080000, "maincpu", 0)
+ROM_LOAD("app1.bin", 0x00000, 0x04B02,
+                CRC(e398abcf) SHA1(91928952e9fc41d6ee133805652134375bd70dc0))
+MISSING_SOUND
+ROM_END
+
 GAME(1998, ep_test, 0, maygayep, maygayep, maygayep_state, init_maygayep, ROT0,
-     "Custom", "Custom EPOCH Test ROM",
+     "Custom", "Custom EPOCH Test ROM 3",
+     EPOCH_GAME_FLAGS)
+
+GAME(1998, ep_test1, ep_test, maygayep, maygayep, maygayep_state, init_maygayep, ROT0,
+     "Custom", "Custom EPOCH Test ROM 1",
      EPOCH_GAME_FLAGS)
 

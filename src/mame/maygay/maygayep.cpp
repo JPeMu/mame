@@ -232,6 +232,7 @@ void maygayep_state::machine_start() {
   logerror("maygayep::machine_start\n");
 	m_lamps.resolve();
   m_leds.resolve();
+  m_status.resolve();
 }
 
 void maygayep_state::machine_reset() {
@@ -245,10 +246,19 @@ void maygayep_state::machine_reset() {
 
   ep_led_dim_level = 0;
   ep_lamp_dim_level = 0;
+
   for (int i = 0; i < 8; i++) {
     ep_led_timers[i] = 0;
     ep_lamp_timers[i] = 0;
     ep_reel_drives[i] = 0;
+  }
+
+  ep_hopper_drive = 0;
+  ep_mech_diverts = 0;
+  ep_mech_drive = 0;
+  
+  for (int i = 0; i < 512; i++) {
+    ep_input_irqen[i] = 0;
   }
 
   ep_last_read_int_status = 0;
@@ -257,24 +267,24 @@ void maygayep_state::machine_reset() {
 // NMI is periodic? or triggered by a write?
 TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::refreshtimer )
 {
-  if (!(ep_int_status & INT_REFRESH)) {
+//  if (!(ep_int_status & INT_REFRESH)) {
     ep_int_status |= INT_REFRESH;
 
     if (ep_int_enable & INT_REFRESH) {
         raise_ext_irq5();
     }
-  }
+//  }
 }
 
 TIMER_DEVICE_CALLBACK_MEMBER( maygayep_state::synctimer )
 {
-  if (!(ep_int_status & INT_SYNC)) {
+//  if (!(ep_int_status & INT_SYNC)) {
     ep_int_status |= INT_SYNC;
 
     if (ep_int_enable & INT_SYNC) {
         raise_ext_irq5();
     }
-  }
+//  }
 }
 
 void maygayep_state::raise_ext_irq5(void) {
@@ -291,7 +301,7 @@ void maygayep_state::maygayep_map(address_map &map) {
 
   map(0xFE0800, 0xFE09FF).rw(FUNC(maygayep_state::lamps_read), FUNC(maygayep_state::lamps_write));
   map(0xFE0A00, 0xFE0BFF).rw(FUNC(maygayep_state::leds_read), FUNC(maygayep_state::leds_write));
-  map(0xFE0C00, 0xFE0DFF).rw(FUNC(maygayep_state::inputs_read), FUNC(maygayep_state::inputs_write));
+  map(0xFE0C00, 0xFE0DFF).rw(FUNC(maygayep_state::inputs_read), FUNC(maygayep_state::dummy_write));
   map(0xFE0E00, 0xFE0FFF).rw(FUNC(maygayep_state::input_int_read), FUNC(maygayep_state::input_int_write));
 
   map(0xFE1000, 0xFE1007).rw(FUNC(maygayep_state::misc_read), FUNC(maygayep_state::misc_write));
@@ -310,6 +320,31 @@ void maygayep_state::maygayep_map(address_map &map) {
   map(0xFFFF15, 0xFFFF15).rw(FUNC(maygayep_state::epintstt_r), FUNC(maygayep_state::epintctl_w));
 
   map(0xFFFF18, 0xFFFF19).rw(FUNC(maygayep_state::dips_r), FUNC(maygayep_state::dummy_write));
+}
+
+uint8_t maygayep_state::port8_read(void) {
+  return m_rtc.get_port_8();
+}
+
+uint8_t maygayep_state::porta_read(void) {
+  return m_rtc.get_port_a();
+}
+
+void maygayep_state::port8_write(uint8_t value) {
+
+}
+
+void maygayep_state::porta_write(uint8_t value) {
+  bool cpuClock = (value & 0x02) ? true : false;
+	bool cpuData = (value & 0x04) ? true : false;
+	m_rtc.write(cpuClock, cpuData);
+}
+
+
+void maygayep_state::maygayep_iomap(address_map &map) {
+	map(h8_device::PORT_8, h8_device::PORT_8).rw(FUNC(maygayep_state::port8_read), FUNC(maygayep_state::port8_write));
+	map(h8_device::PORT_A, h8_device::PORT_A).rw(FUNC(maygayep_state::porta_read), FUNC(maygayep_state::porta_write));
+	//map(h8_device::ADC_0, h8_device::ADC_3).noprw(); // MCU reads these, but the games have no analog controls
 }
 
 void maygayep_state::dummy_write(offs_t addr, uint8_t value)
@@ -366,18 +401,23 @@ uint8_t maygayep_state::epintstt_r(offs_t addr) {
 void maygayep_state::epsysstt_w(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to EPSYSSTT\n", value);
   ep_sys_status = value;
-  //m_lamps[1] = (value & 0x02) >> 1;
 }
 
 void maygayep_state::epsysctl_w(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to EPSYSCTL\n", value);
   ep_sys_control = value;
+  m_status[0] = ((value & 0x02) >> 1);
+  for (int i = 0; i < 8; i++) {
+    m_lamps[256 + i] = value & BIT(value, i);
+  }
 }
 
 void maygayep_state::epioctl_w(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to EPIOCTL\n", value);
   ep_io_control = value;
-  //m_lamps[2] = (value & 0x02) >> 1;
+  for (int i = 0; i < 8; i++) {
+    m_lamps[264 + i] = value & BIT(value, i);
+  }
 }
 
 void maygayep_state::epsysenb_w(offs_t addr, uint8_t value) {
@@ -399,9 +439,6 @@ void maygayep_state::epintctl_w(offs_t addr, uint8_t value) {
   ep_int_status &= ~masked_bits;
 
   logerror("Wrote %02x to EPINTCTL. Clearing: %02x\n", value, masked_bits);
-  for (int i = 0; i < 8; i++) {
-    //m_lamps[128 + i] = BIT(value, i);
-  }
 }
 
 
@@ -422,11 +459,24 @@ uint8_t maygayep_state::misc_read(offs_t addr) {
   uint8_t value = 0x00;
 
   switch(addr) {
+    case 0: // Alpha
+    case 1: // Alpha Ctrl:
+      value = 0xff;
+      break;
+    case 2: // Coin Mech
+      value = ep_mech_drive;
+      break;
+    case 3: // Coin Diverts
+      value = ep_mech_diverts;
+      break;
     case 4: // Reels 1+2
       value = ep_reel_drives[0] | (ep_reel_drives[1] << 4);
       break;
     case 5: // Reels 3+4
       value = ep_reel_drives[1] | (ep_reel_drives[2] << 4);
+      break;
+    case 7: // Hoppers
+      value = ep_hopper_drive;
       break;
     default:
       logerror("Read from MISC %08x\n", addr);
@@ -439,7 +489,16 @@ uint8_t maygayep_state::misc_read(offs_t addr) {
 void maygayep_state::misc_write(offs_t addr, uint8_t value) {
   switch(addr) {
     case 0: // Alpha
-      logerror("Alpha output: %02x [%c]\n", value, ascokitab[value & 0x3f]);
+      logerror("     ----- Alpha output: %02x [%c]\n", value, ascokitab[value & 0x3f]);
+      break;
+    case 1: // Alpha Ctrl + Meter/Mech Lamps
+      logerror("Wrote Alpha + Lamp Control: %02x\n", value);
+      break;
+    case 2: // Coin Mech
+      ep_mech_drive = value;
+      break;
+    case 3: // Coin Divers
+      ep_mech_diverts = value;
       break;
     case 4: // Reels 1+2
       ep_reel_drives[0] = value & 0x0f;
@@ -451,6 +510,11 @@ void maygayep_state::misc_write(offs_t addr, uint8_t value) {
       ep_reel_drives[3] = (value >> 4) & 0x0f;
       reel34_w(value);
       break;
+    case 6: // Meters + Notes
+      break;
+    case 7: // Note Escrow and Hopper
+      ep_hopper_drive = value;
+      break;
     default:
       logerror("Wrote %02x to MISC %08x\n", value, addr);
       for (int i = 0; i < 8; i++) {
@@ -461,23 +525,46 @@ void maygayep_state::misc_write(offs_t addr, uint8_t value) {
 }
 
 uint8_t maygayep_state::inputs_read(offs_t addr) {
-  if (addr == 4) {
-    return ((m_optic_pattern << 4) & 0xf0) | 0x01;
+  uint8_t value = 0x00;
+  uint8_t stakePrize = 0x39;
+  
+  switch(addr) {
+    case 0x02: // Coin Mech + Stake Key
+      value = 0x13; // Cheat for simpsons testing
+      break;
+    case 0x03: // Stake and Percent Keys
+      value = 0xc0;
+      value |= ((stakePrize & 0x0c) >> 2);
+      value |= ((stakePrize & 0x10) >> 1);
+      if (ep_mech_drive & 0x01) {
+        value |= ((stakePrize & 0x40) >> 4);
+      } else {
+        value |= ((stakePrize & 0x20) >> 3);
+      }
+      break;
+    case 0x04: // Reel Optos
+      value = ((m_optic_pattern << 4) & 0xf0) | 0x01;
+      break;
+    case 0x05: // Hopper Returns + Meter SW + Note Alarm
+      value = 0x40;
+      if (ep_hopper_drive & 0x20) {
+        value |= 0x01;
+      }
+      break;
+    default:
+      break;
   }
 
-  return 0xff;
-}
-
-void maygayep_state::inputs_write(offs_t addr, uint8_t value) {
-  // logerror("Wrote %02x to INPUTS %d\n", value, addr);
+  return value;
 }
 
 uint8_t maygayep_state::input_int_read(offs_t addr) {
-    return 0xff;
+    return ep_input_irqen[addr];
 }
 
 void maygayep_state::input_int_write(offs_t addr, uint8_t value) {
   logerror("Wrote %02x to INPUT INTERRUPTS %d\n", value, addr);
+  ep_input_irqen[addr] = value;
 }
 
 uint8_t maygayep_state::leds_read(offs_t addr) {
@@ -775,6 +862,7 @@ void maygayep_state::init_maygayep() {
 void maygayep_state::maygayep(machine_config &config) {
   H83002(config, m_maincpu, CPU_CLOCK);
   m_maincpu->set_addrmap(AS_PROGRAM, &maygayep_state::maygayep_map);
+	m_maincpu->set_addrmap(AS_IO, &maygayep_state::maygayep_iomap);
 
   SPEAKER(config, "lspeaker").front_left();
   SPEAKER(config, "rspeaker").front_right();
